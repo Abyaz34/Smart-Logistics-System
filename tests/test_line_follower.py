@@ -31,7 +31,7 @@ def on_forever():
    elif left == 1 and right == 1:
        # Lost the line entirely = Sharp 90-degree corner
        if last_turn == 1:
-           maqueen.motor_run(maquegen.Motors.M2, maqueen.Dir.CW, outer_wheel_speed)
+           maqueen.motor_run(maqueen.Motors.M2, maqueen.Dir.CW, outer_wheel_speed)
            maqueen.motor_stop(maqueen.Motors.M1) 
        elif last_turn == 2:
            maqueen.motor_run(maqueen.Motors.M1, maqueen.Dir.CW, outer_wheel_speed)
