@@ -11,7 +11,6 @@ def on_forever():
     left = maqueen.read_patrol(maqueen.Patrol.PATROL_LEFT)
     right = maqueen.read_patrol(maqueen.Patrol.PATROL_RIGHT)
     
-    # --- ADDED STOP LOGIC ---
     # This checks if both sensors are on the thick black bar.
     # We add a tiny pause and check again to make sure it's not just a thin cross-line.
     if left == 0 and right == 0:
@@ -22,8 +21,6 @@ def on_forever():
             maqueen.motor_stop(maqueen.Motors.ALL)
             # This 'return' stops the rest of the code from running so it stays stopped.
             return
-    # ------------------------
-
     if left == 0 and right == 0:
         # Perfectly on the line
         maqueen.motor_run(maqueen.Motors.ALL, maqueen.Dir.CW, base_speed)
