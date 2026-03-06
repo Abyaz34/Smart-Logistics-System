@@ -14,12 +14,12 @@ color_ranges = {
     "YELLOW": [(15, 100, 100), (35, 255, 255)]
 }
 
-cap = cv2.VideoCapture(0) # change to 1 when using external webcame
+cap = cv2.VideoCapture(0)
 
 last_center = None
 stable_start_time = None
 STABLE_THRESHOLD = 3  # seconds
-current_color = None  # store detected color
+current_color = None
 
 while True:
     ret, frame = cap.read()
@@ -29,6 +29,7 @@ while True:
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     detected_box = None
     current_color = None
+    color_confidence = 0
 
     # Detect each color
     for color_name, (lower, upper) in color_ranges.items():
@@ -37,15 +38,22 @@ while True:
 
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area > 2000:  # filter noise
+            if area > 2000:
                 x, y, w, h = cv2.boundingRect(cnt)
                 detected_box = (x, y, w, h)
-                current_color = color_name.replace("2", "")  # RED2 → RED
+                current_color = color_name.replace("2", "")
 
-                # Draw bounding box + color label
+                # Compute color confidence
+                roi_mask = mask[y:y+h, x:x+w]
+                non_zero = cv2.countNonZero(roi_mask)
+                total_pixels = w * h
+                color_confidence = non_zero / total_pixels
+
+                # Draw bounding box
                 cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 255, 255), 2)
-                cv2.putText(frame, current_color, (x, y - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                cv2.putText(frame, f"{current_color} ({color_confidence*100:.1f}%)",
+                            (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
+                            (255, 255, 255), 2)
 
     # Stability check
     if detected_box:
@@ -56,11 +64,9 @@ while True:
             last_center = center
             stable_start_time = time.time()
 
-        # Check if center moved
         if abs(center[0] - last_center[0]) < 5 and abs(center[1] - last_center[1]) < 5:
             elapsed = time.time() - stable_start_time
 
-            # Show timer on screen
             cv2.putText(frame, f"Stable: {elapsed:.1f}s",
                         (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
                         1, (0, 255, 0), 2)
@@ -69,15 +75,26 @@ while True:
                 roi = frame[y:y+h, x:x+w]
                 result = reader.readtext(roi)
 
-                print(f"Detected Color: {current_color}")
-                print("Detected Text:")
+                print(f"\nDetected Color: {current_color}")
+                print(f"Color Confidence: {color_confidence:.3f}")
+
                 if len(result) == 0:
-                    print("NONE")
+                    print("Detected Text: NONE")
+                    ocr_conf = 0
                 else:
+                    ocr_conf = np.mean([r[2] for r in result])
+                    print("Detected Text:")
                     for r in result:
                         print(r[1])
 
-                stable_start_time = time.time() + 999  # prevent repeated reading
+                # Compute reliability score
+                stability_score = min(elapsed / STABLE_THRESHOLD, 1)
+                reliability = (0.4 * color_confidence) + (0.3 * ocr_conf) + (0.3 * stability_score)
+
+                print(f"OCR Confidence: {ocr_conf:.3f}")
+                print(f"Reliability Score: {reliability:.3f}")
+
+                stable_start_time = time.time() + 999
 
         else:
             stable_start_time = time.time()
@@ -85,7 +102,7 @@ while True:
         last_center = center
 
     cv2.imshow("Frame", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'): # to exit press q
+    if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
 cap.release()
