@@ -2,6 +2,18 @@ import cv2
 import numpy as np
 import easyocr
 import time
+import csv
+import os
+
+from datetime import datetime
+
+# Initialize CSV
+CSV_FILE = 'log.csv'
+
+if not os.path.exists(CSV_FILE):
+    with open(CSV_FILE, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["Timestamp", "Color", "Text", "Category", "Reliability"]) 
 
 # Initialize OCR
 reader = easyocr.Reader(['en'])
@@ -14,17 +26,31 @@ color_ranges = {
     "YELLOW": [(15, 100, 100), (35, 255, 255)]
 }
 
+# Function for logging to CSV
+def log_to_csv(color, text, reliability):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    category = f"{color}-{text}" if text else color
+    
+    with open(CSV_FILE, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([timestamp, color, text, category, f"{reliability:.2f}"])
+    print(f"--> LOGGED: {category}")
+
+
 cap = cv2.VideoCapture(0)
 
 last_center = None
 stable_start_time = None
-STABLE_THRESHOLD = 3  # seconds
+STABLE_THRESHOLD = 1
 current_color = None
 
 while True:
     ret, frame = cap.read()
     if not ret:
         break
+
+    # Clean copy for OCR
+    frame_for_ocr = frame.copy()
 
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     detected_box = None
@@ -72,24 +98,35 @@ while True:
                         1, (0, 255, 0), 2)
 
             if elapsed >= STABLE_THRESHOLD:
-                roi = frame[y:y+h, x:x+w]
+                roi = frame_for_ocr[y:y+h, x:x+w]
                 result = reader.readtext(roi)
 
                 print(f"\nDetected Color: {current_color}")
                 print(f"Color Confidence: {color_confidence:.3f}")
 
+                detected_text = ""
+
                 if len(result) == 0:
                     print("Detected Text: NONE")
+                    detected_text = "NONE"
                     ocr_conf = 0
                 else:
                     ocr_conf = np.mean([r[2] for r in result])
                     print("Detected Text:")
+                    
+                    text_parts = []
                     for r in result:
-                        print(r[1])
+                        print(r[1]) 
+                        text_parts.append(r[1])
+
+                    detected_text = " ".join(text_parts)
 
                 # Compute reliability score
                 stability_score = min(elapsed / STABLE_THRESHOLD, 1)
                 reliability = (0.4 * color_confidence) + (0.3 * ocr_conf) + (0.3 * stability_score)
+
+                # Log to CSV
+                log_to_csv(current_color, detected_text, reliability)
 
                 print(f"OCR Confidence: {ocr_conf:.3f}")
                 print(f"Reliability Score: {reliability:.3f}")
