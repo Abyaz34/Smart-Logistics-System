@@ -1,2 +1,3 @@
-# Smart-Logistics-System
-A Python-based autonomous control system for the ECTE471 Robotic Assembly line. Implements a modular State Machine to coordinate a Mobile Robot and Dobot arm. Features a custom Computer Vision pipeline using OpenCV and Tesseract OCR to sort 'DXB/SHJ' cargo based on real-time color and text analysis.
+# Smart Logistics System: Autonomous Assembly & Sorting
+
+A Python-based autonomous control system for the ECTE471 Robotic Project. This project implements a modular State Machine in MakeCode Python to drive a MaQueen mobile robot coordinating with a Dobot Magician and a WebCam. It features a custom Computer Vision pipeline using OpenCV and EasyOCR to sort Green, Yellow, and Red 'DXB/SHJ' cargo based on real-time color and text analysis. The system uses the webcam as a "virtual presence sensor" to synchronize the hardware without direct communication, and logs real-time metrics to a live Streamlit dashboard.
