@@ -1,0 +1,218 @@
+from pydobotplus import Dobot
+from serial.tools import list_ports
+import time
+import cv2
+import numpy as np
+import easyocr
+
+# --- 1. Initialize Vision System ---
+print("Initializing OCR Reader (This might take a few seconds)...")
+reader = easyocr.Reader(['en'])
+
+color_ranges = { 
+    "RED": [(0, 120, 70), (10, 255, 255)],
+    "RED2": [(170, 120, 70), (180, 255, 255)],
+    "GREEN": [(36, 50, 70), (89, 255, 255)],
+    "YELLOW": [(15, 100, 100), (35, 255, 255)]
+}
+
+cap = cv2.VideoCapture(0)
+
+# --- 2. Coordinates (X, Y, Z, R) ---
+
+HOME = (213.15, 90.37, 166.78, 0)
+
+PICK_UP_TOP = (211.34, 152.35, 132.28, 0)
+PICK_UP     = (146.16, 127.07, 10.43, 0)
+
+CAMERA_TOP  = (58.76, 269.31, 141.20, 0)
+CAMERA      = (68.57, 295.85, 30.71, 0)
+
+CONVEYOR_TOP  = (159.21, -240.67, 128.31, 0)
+CONVEYOR_DROP = (178.11, -235.86, 20.60, 0)
+
+RED_TOP  = (184.50, -201.45, 128.00, 0)
+RED_DROP = (184.50, -201.45, 20.00, 0)
+
+# --- 3. Camera Inspection ---
+def inspect_block(device, cap, reader, base_coords):
+
+    x, y, z, base_r = base_coords
+    current_r = base_r
+
+    for attempt in range(4):
+
+        print(f"Inspection Attempt {attempt + 1} at R={current_r} degrees...")
+        device.move_to(x, y, z, current_r, wait=True)
+
+        start_time = time.time()
+
+        while time.time() - start_time < 3.0:
+
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+            for color_name, (lower, upper) in color_ranges.items():
+
+                mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+                for cnt in contours:
+
+                    if cv2.contourArea(cnt) > 2000:
+
+                        bx, by, bw, bh = cv2.boundingRect(cnt)
+
+                        # Normalize RED2 → RED
+                        color_name = color_name.replace("2", "")
+
+                        roi = frame[by:by+bh, bx:bx+bw]
+
+                        if roi.shape[0] > 10 and roi.shape[1] > 10:
+
+                            results = reader.readtext(roi, detail=0)
+
+                            for text in results:
+
+                                clean_text = text.strip().upper()
+
+                                if "SHJ" in clean_text:
+                                    return color_name, "SHJ"
+
+                                elif "DXB" in clean_text:
+                                    return color_name, "DXB"
+
+            cv2.waitKey(1)
+
+        current_r += 45.0
+
+    return None, "UNKNOWN"
+
+
+# --- 4. Connect to the Dobot ---
+available_ports = list_ports.comports()
+
+if not available_ports:
+    print("No Dobot detected. Check your USB connection or close DobotStudio.")
+    exit()
+
+port = available_ports[0].device
+print(f"Connecting to Dobot on port {port}...")
+
+device = Dobot(port=port)
+
+device.speed(50, 50)
+device.clear_alarms()
+
+
+# --- 5. Execute the Sequence ---
+try:
+
+    print("Starting sequence...")
+
+    # 1. Home
+    device.move_to(*HOME, wait=True)
+
+    # 2. Pick up
+    device.move_to(*PICK_UP, wait=True)
+    device.suck(True)
+    time.sleep(0.5)
+
+    # 3. Pick up top
+    device.move_to(*PICK_UP_TOP, wait=True)
+
+    # 4. Camera top
+    device.move_to(*CAMERA_TOP, wait=True)
+
+    # 5. Camera inspection
+    device.move_to(*CAMERA, wait=True)
+
+    detected_color, detected_text = inspect_block(device, cap, reader, CAMERA)
+
+    print(f"Final Decision -> Color: {detected_color}, Text: {detected_text}")
+
+    # 6. Camera top
+    device.move_to(*CAMERA_TOP, wait=True)
+
+    # --- RED BLOCK HANDLING ---
+    if detected_color == "RED":
+
+        print("RED block detected → Sending to RED_DROP")
+
+        device.move_to(*RED_TOP, wait=True)
+        device.move_to(*RED_DROP, wait=True)
+
+        device.suck(False)
+        time.sleep(0.5)
+
+        device.move_to(*RED_TOP, wait=True)
+
+    else:
+
+        # 7. Home
+        device.move_to(*HOME, wait=True)
+
+        # 8. Conveyor top
+        device.move_to(*CONVEYOR_TOP, wait=True)
+
+        # 9. Conveyor drop
+        device.move_to(*CONVEYOR_DROP, wait=True)
+
+        device.suck(False)
+        time.sleep(0.5)
+
+        device.move_to(*CONVEYOR_TOP, wait=True)
+
+        # 10. Conveyor logic
+        if detected_text in ["SHJ", "DXB"] and detected_color:
+
+            print(f"Routing block: {detected_color} {detected_text}")
+
+            if detected_color == "GREEN":
+                speed_ratio = 0.5
+
+            elif detected_color == "YELLOW":
+                speed_ratio = 0.2
+
+            direction_val = -1 if detected_text == "DXB" else 1
+
+            device.conveyor_belt(
+                speed=speed_ratio,
+                direction=direction_val,
+                interface=0
+            )
+
+            time.sleep(3.0)
+
+            device.conveyor_belt(
+                speed=0,
+                direction=direction_val,
+                interface=0
+            )
+
+        else:
+            print("Block not recognized. Conveyor will not move.")
+
+    # 11. Home
+    device.move_to(*HOME, wait=True)
+
+    print("Sequence complete!")
+
+except Exception as e:
+
+    print(f"An error occurred: {e}")
+
+finally:
+
+    device.suck(False)
+    device.conveyor_belt(speed=0, direction=1, interface=0)
+
+    device.close()
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+    print("Disconnected safely.")
